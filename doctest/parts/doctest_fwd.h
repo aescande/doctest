@@ -904,7 +904,7 @@ namespace detail {
     };
 
     // Vector<int> and various type other than pointer or array.
-    template<typename T>
+    template<typename T, typename U = void>
     struct filldata
     {
         static void fill(std::ostream* stream, const T &in) {
