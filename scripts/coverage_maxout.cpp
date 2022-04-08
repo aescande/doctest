@@ -106,9 +106,9 @@ TEST_CASE("exercising tricky code paths of doctest") {
     str                    = unknown;          // trigger code path for deleting memory in operator=
     CHECK_MESSAGE(len_is_zero, "should fail");
 
-    Approx a(5);
+    Approx a(5.);
     a.scale(4);
-    Approx b = a(7);
+    Approx b = a(7.);
 
     CHECK(b == 5);
     CHECK(b != 5);

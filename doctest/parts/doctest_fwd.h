@@ -481,6 +481,9 @@ DOCTEST_MSVC_SUPPRESS_WARNING_POP
 #include <type_traits>
 #endif // DOCTEST_CONFIG_INCLUDE_TYPE_TRAITS
 
+#include <cmath>
+#include <limits>
+
 namespace doctest {
 
 DOCTEST_INTERFACE extern bool is_running_in_test;
@@ -1034,19 +1037,34 @@ String toString(const DOCTEST_REF_WRAP(T) value) {
 DOCTEST_INTERFACE String toString(const std::string& in);
 #endif // VS 2019
 
-class DOCTEST_INTERFACE Approx
+template <typename Type, typename U = void>
+struct approx_traits;
+
+template <typename Type>
+struct approx_traits<Type, typename detail::enable_if<std::is_constructible<double, Type>::value>::type>
+{
+    static bool comp(const Type & lhs, const Type & rhs, double epsilon, double scale) {
+        // Thanks to Richard Harris for his help refining this formula
+        return std::fabs(lhs - rhs) <
+               epsilon * (scale + std::max<double>(std::fabs(lhs), std::fabs(rhs)));
+    }
+};
+
+
+template<typename Type = double>
+class Approx
 {
 public:
-    explicit Approx(double value);
+    explicit Approx(const Type & value);
 
-    Approx operator()(double value) const;
+    Approx operator()(const Type & value) const;
 
 #ifdef DOCTEST_CONFIG_INCLUDE_TYPE_TRAITS
     template <typename T>
     explicit Approx(const T& value,
-                    typename detail::enable_if<std::is_constructible<double, T>::value>::type* =
+                    typename detail::enable_if<std::is_constructible<Type, T>::value>::type* =
                             static_cast<T*>(nullptr)) {
-        *this = Approx(static_cast<double>(value));
+        *this = Approx(static_cast<Type>(value));
     }
 #endif // DOCTEST_CONFIG_INCLUDE_TYPE_TRAITS
 
@@ -1073,24 +1091,27 @@ public:
 #endif // DOCTEST_CONFIG_INCLUDE_TYPE_TRAITS
 
     // clang-format off
-    DOCTEST_INTERFACE friend bool operator==(double lhs, const Approx & rhs);
-    DOCTEST_INTERFACE friend bool operator==(const Approx & lhs, double rhs);
-    DOCTEST_INTERFACE friend bool operator!=(double lhs, const Approx & rhs);
-    DOCTEST_INTERFACE friend bool operator!=(const Approx & lhs, double rhs);
-    DOCTEST_INTERFACE friend bool operator<=(double lhs, const Approx & rhs);
-    DOCTEST_INTERFACE friend bool operator<=(const Approx & lhs, double rhs);
-    DOCTEST_INTERFACE friend bool operator>=(double lhs, const Approx & rhs);
-    DOCTEST_INTERFACE friend bool operator>=(const Approx & lhs, double rhs);
-    DOCTEST_INTERFACE friend bool operator< (double lhs, const Approx & rhs);
-    DOCTEST_INTERFACE friend bool operator< (const Approx & lhs, double rhs);
-    DOCTEST_INTERFACE friend bool operator> (double lhs, const Approx & rhs);
-    DOCTEST_INTERFACE friend bool operator> (const Approx & lhs, double rhs);
+     friend bool operator==(const Type &  lhs, const Approx & rhs) {return approx_traits<Type>::comp(lhs, rhs.m_value, rhs.m_epsilon, rhs.m_scale);}
+     friend bool operator==(const Approx & lhs, const Type &  rhs) { return operator==(rhs, lhs); }
+     friend bool operator!=(const Type &  lhs, const Approx & rhs) { return !operator==(lhs, rhs); }
+     friend bool operator!=(const Approx & lhs, const Type &  rhs) { return !operator==(rhs, lhs); }
+     friend bool operator<=(const Type &  lhs, const Approx & rhs) { return double(lhs) < rhs.m_value || lhs == rhs; }
+     friend bool operator<=(const Approx & lhs, const Type &  rhs) { return lhs.m_value < double(rhs) || lhs == rhs; }
+     friend bool operator>=(const Type &  lhs, const Approx & rhs) { return double(lhs) > rhs.m_value || lhs == rhs; }
+     friend bool operator>=(const Approx & lhs, const Type &  rhs) { return lhs.m_value > double(rhs) || lhs == rhs; }
+     friend bool operator< (const Type &  lhs, const Approx & rhs) { return double(lhs) < rhs.m_value && lhs != rhs; }
+     friend bool operator< (const Approx & lhs, const Type &  rhs) { return lhs.m_value < double(rhs) && lhs != rhs; }
+     friend bool operator> (const Type &  lhs, const Approx & rhs) { return double(lhs) > rhs.m_value && lhs != rhs; }
+     friend bool operator> (const Approx & lhs, const Type &  rhs) { return lhs.m_value > double(rhs) && lhs != rhs; }
 
-    DOCTEST_INTERFACE friend String toString(const Approx& in);
+     friend String toString(const Approx& in) {
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+        return "Approx( " + doctest::toString(in.m_value) + " )";
+     }
 
 #ifdef DOCTEST_CONFIG_INCLUDE_TYPE_TRAITS
 #define DOCTEST_APPROX_PREFIX \
-    template <typename T> friend typename detail::enable_if<std::is_constructible<double, T>::value, bool>::type
+    template <typename T> friend typename detail::enable_if<std::is_constructible<Type, T>::value, bool>::type
 
     DOCTEST_APPROX_PREFIX operator==(const T& lhs, const Approx& rhs) { return operator==(double(lhs), rhs); }
     DOCTEST_APPROX_PREFIX operator==(const Approx& lhs, const T& rhs) { return operator==(rhs, lhs); }
@@ -1112,10 +1133,34 @@ public:
 private:
     double m_epsilon;
     double m_scale;
-    double m_value;
+    Type m_value;
 };
 
-DOCTEST_INTERFACE String toString(const Approx& in);
+
+template <typename Type>
+inline Approx<Type>::Approx(const Type& value)
+        : m_epsilon(static_cast<double>(std::numeric_limits<float>::epsilon()) * 100)
+        , m_scale(1.0)
+        , m_value(value) {}
+
+template <typename Type>
+inline Approx<Type> Approx<Type>::operator()(const Type& value) const {
+    Approx approx(value);
+    approx.epsilon(m_epsilon);
+    approx.scale(m_scale);
+    return approx;
+}
+
+template <typename Type>
+inline Approx<Type>& Approx<Type>::epsilon(double newEpsilon) {
+    m_epsilon = newEpsilon;
+    return *this;
+}
+template <typename Type>
+inline Approx<Type>& Approx<Type>::scale(double newScale) {
+    m_scale = newScale;
+    return *this;
+}
 
 DOCTEST_INTERFACE const ContextOptions* getContextOptions();
 
